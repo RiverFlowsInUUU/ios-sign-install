@@ -209,6 +209,8 @@ python -m pymobiledevice3 apps query <bundle-id> | grep -E "CFBundleIdentifier|C
 | 类型 | 为什么难 | 判断方法 |
 |---|---|---|
 | **SwiftUI + `@Observable` + StoreKit 2** | 付费判定是计算属性，被**完全内联**进各个视图；没有独立 getter，也就没有"改一处"的单点 | 导入符号里有 `Observation0A9RegistrarV6access`；且全程序搜不到调用它的读字段小函数 |
+| **状态放在第三方 Atom 库（`XxxAtom` 空类型）** | `@Observable` 类 `numFields=0`，值存在全局 store；`hasProFeatures` 这类计算属性读 store，内联后每处都有 `bl`，且**没有任何静态单点** | `__swift5_types` 里能解析出 `XxxAtom` 但 FieldDescriptor `numFields=0`；真实状态字段名（如 `isPro`）在 reflstr 里搜不到 |
+| **所有 UI 调用都走 witness table** | SwiftUI 的 `View.body` 通过 `__swift5_proto` 的 conformance 调用，**`bl` 静态追不到**（本项目实测：付费墙视图函数 `bl` 调用者 0 次，只能靠 witness 表） | 目标函数的 `bl` 调用点统计为 0，但函数明显在跑 |
 | 付费墙靠 SwiftUI 状态弹出 | 门槛处不直接调视图函数，只置一个 `@State`/`@Published` 标志，静态追不到"谁触发的" | 搜付费墙视图函数的调用点，只有 1 个（视图链内部） |
 | 交易由 StoreKit 2 校验 | 交易是 Apple 签名的 JWS，本地伪造不了 | 字符串里有 `Transaction.currentEntitlements` / `VerificationResult` |
 
@@ -218,6 +220,23 @@ python -m pymobiledevice3 apps query <bundle-id> | grep -E "CFBundleIdentifier|C
 
 同理，**不要**用"再跑一遍更大的扫描"当作承诺：先把"为什么静态找不到"讲清楚，
 再让对方决定要不要投入。
+
+### 实测账单（Conflux 2.2.3，2026-11-03）
+
+按顺序排掉的路，全部有指令级证据：
+
+| 查了什么 | 结果 | 结论 |
+|---|---|---|
+| `hasProFeatures` 是不是存储属性 | `__swift5_fieldmd` 里反查不到任何 rel32 指向它；只在 `__LINKEDIT` 出现 1 次（`hasProFeaturesSbv`，demangled 名池） | **计算属性，无字段、无 getter 单点** |
+| 有没有 `isPro` 之类的存储字段 | 全程序 15 处 `isPro`，全是 `isProgressive*` / `isPrepare*` 误匹配 | 没有 |
+| 状态存哪 | `PremiumTypeAtom` / `PremiumProductsAtom` / `ShowPremiumSheetAtom` 三个类型的 FieldDescriptor `numFields=0` | **值在 Atom 库的全局 store，不在对象里** |
+| 能不能改枚举判等 | `PremiumType` FieldDescriptor = `['none','pro','ultra']`（tag 0/1/2），但没有 `Equatable` witness 可改（`__swift5_proto` 里找不到它的 conformance；简单 enum 的 `==` 被内联成 `cmp`） | 没有单点 |
+| 能不能追调用链 | 付费墙视图函数 `bl` 调用者 **0 次** | **UI 全走 witness table，静态追不到** |
+| 有没有服务器校验 | 全库无 license/activate/verify 类 URL | 纯本地，但本地也无处下手 |
+
+**结论：结构上就是没有静态单点。** 这不是"再扫一遍"能解决的 ——
+要动只能动态（注入 dylib / lldb），需要越狱或开发者模式；
+或者改 `AtomStore` 的全局字典，静态同样做不到。
 
 ## 隐私红线（如果这套流程要进 public 仓库）
 
