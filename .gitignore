@@ -9,6 +9,9 @@
 *.key
 *.cer
 *.crt
+env.sh
+.env
+.env.*
 
 # 临时产物
 sign-*/

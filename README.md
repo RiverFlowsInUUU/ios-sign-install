@@ -39,6 +39,22 @@ python deploy.py --ipa in.ipa \
 **这样 `ps` 和 shell 历史里都不会出现密码**。临时文件在签名结束后删除。
 只有机器上没有 openssl 时，才退回 zsign 的 `-p` 参数，并明确提示。
 
+## 给 AI 用的时候
+
+skill 里没有任何证书/密码/UDID，所以 agent 会缺材料。**它应该只要路径，不要密码明文**：
+
+```bash
+# 你自己准备（仓库外）：
+#   ~/ios-sign/cert.p12  app.mobileprovision  in.ipa
+#   ~/ios-sign/env.sh    ->  export P12_PASSWORD='***'   (chmod 600)
+
+set -a; . ~/ios-sign/env.sh; set +a
+python deploy.py --ipa ~/ios-sign/in.ipa --p12 ~/ios-sign/cert.p12 \
+                 --profile ~/ios-sign/app.mobileprovision --out out.ipa --install
+```
+
+密码经环境变量进入进程，不出现在命令行，也不出现在对话里。细节见 SKILL.md「材料怎么交给 agent」。
+
 ## 装什么
 
 ```

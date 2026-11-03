@@ -35,6 +35,47 @@ description: Windows 上全命令行给 iPhone 签名并装机（zsign + pymobil
    export P12_PASSWORD='***'
    ```
 
+## 材料怎么交给 agent（这条最容易出错）
+
+本 skill **故意不含**证书、密码、UDID、bundle id —— 它们属于使用者，放在仓库外。
+所以 agent 第一次跑必然缺材料。它需要的是**四样东西**，但**只有三样该向用户要**：
+
+| 它需要 | 应该怎么问 | 不要这样 |
+|---|---|---|
+| 要签的 ipa 路径 | 直接问路径 | — |
+| p12 路径 | 直接问路径 | — |
+| 描述文件路径 | 直接问路径 | — |
+| **p12 密码** | 请用户**自己**写进环境变量 / 文件，再说"好了" | ❌ 不要"把密码发给我"，不要要求贴在对话里 |
+| 设备 | 请用户插线 + 点信任 + 解锁 | ❌ 不要猜 UDID |
+
+### 推荐的目录布局（全部在仓库外）
+
+```
+~/ios-sign/
+├── cert.p12
+├── app.mobileprovision
+├── env.sh          # export P12_PASSWORD='***'   记得 chmod 600
+└── in.ipa
+```
+
+agent 这样调用，密码不会出现在对话里，也不会出现在命令里：
+
+```bash
+set -a; . ~/ios-sign/env.sh; set +a          # 变量注入进程环境，不回显
+python deploy.py --ipa ~/ios-sign/in.ipa \
+                 --p12 ~/ios-sign/cert.p12 \
+                 --profile ~/ios-sign/app.mobileprovision \
+                 --out out.ipa --install
+```
+
+`set -a` 让 source 进来的变量自动 export；整条命令里只有路径，没有密码值。
+
+### 三条硬规则
+
+1. **缺材料就停在那一步**，不要猜路径、不要拿示例证书顶替、不要"先生成一个自签的试试"。
+2. **不主动索要密码明文**。如果已经出现在对话/日志里，提醒用户：该密码视为已泄露。
+3. 密码只能经由**环境变量**或 `--password-stdin` 进入进程；不接受出现在 `argv` 里。
+
 ## 三步（或者一条命令）
 
 ```bash
