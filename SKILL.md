@@ -102,20 +102,32 @@ python -c "import plistlib,sys;raw=open(sys.argv[1],'rb').read();d=plistlib.load
 卖家的"共享签/企业签"通常给通配；"个人签 / UDID 签"通常按 App ID 逐个签发
 （`Name` 常常就是设备 UDID）。
 
-### ⚠️ 一条**尚未验证**的规则（别当成结论）
+### ✅ 已验证：App 的 bundle id 与描述文件的 App ID **无关**
 
-"App 的 `CFBundleIdentifier` 必须等于描述文件里的 App ID" —— 这条在项目里**没有验证过**。
-两种可能的规则都能解释已有现象：
+实测（同一份**单 App ID** 的描述文件，签过多个不同 bundle id 的 App，全部装机成功）：
 
-- **严**：installd 校验 bundle id 与 App ID 一致 → 换 App 必须换描述文件
-- **松**：只校验 entitlements 是否被描述文件授权，bundle id 不管 → 一份描述文件可签多个 App
+- **bundle id 可以随意改**，改成什么都能装
+- 同一份描述文件能签**任意多**个 App
+- 所以"换个 App 就要一份新描述文件"是**错的**（这条作者一开始也写错了）
 
-已知的观察都不足以区分：本项目签 Egern 时，包内 bundle id 是**我们自己先改**成
-描述文件那个 App ID 的（不是工具改的），所以看到 id 相同不能反推规则。
+真正被校验的是 **entitlements**：签名时把描述文件里的 `Entitlements` 原样写进二进制
+（尤其是 `application-identifier`），而不是把 bundle id 改成 App ID。
 
-**要下结论只需要一次对照实验**：拿一个 bundle id 与描述文件 App ID **不同**的 ipa 原样签名，
-装一次看是否成功。成功了就是"松"，失败（`ApplicationVerificationFailed`）就是"严"。
-在没做这个实验之前，任何"只能签一个 App"或"随便签"的说法都只是猜测。
+### 但有一个真实副作用：所有这样签出来的 App 共用一个身份
+
+因为每个二进制的 `application-identifier` 都等于描述文件里那一个值
+（单 App ID 的情况），所以：
+
+- 这些 App 的 **keychain 访问组**、**App Group 容器 ACL** 是同一个身份
+- 两个 App 若都用同一个 App Group 名，会互相看得到对方的数据
+- 想避免，就要用**通配**描述文件（`TEAMID.*`）—— 那样每个 App 才能拿到自己的 app id
+
+| 描述文件类型 | bundle id | 每个 App 的 `application-identifier` | 隔离性 |
+|---|---|---|---|
+| 通配 `TEAMID.*` | 随意 | `TEAMID.<自己的 bundle id>` | 好，各 App 独立 |
+| 单 App ID `TEAMID.com.x.y` | 随意 | 全部是 `TEAMID.com.x.y` | 差，共用一个身份 |
+
+> 结论：**签名能不能装**只看 entitlements；**装完之后会不会互相串**才看描述文件是通配还是单 App ID。
 
 ## 三步（或者一条命令）
 
