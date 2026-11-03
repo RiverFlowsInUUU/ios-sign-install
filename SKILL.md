@@ -76,6 +76,47 @@ python deploy.py --ipa ~/ios-sign/in.ipa \
 2. **不主动索要密码明文**。如果已经出现在对话/日志里，提醒用户：该密码视为已泄露。
 3. 密码只能经由**环境变量**或 `--password-stdin` 进入进程；不接受出现在 `argv` 里。
 
+## 证书 ≠ 描述文件（最容易混的一件事）
+
+这两样东西经常被口头合称"证书"，但它们的授权范围完全不同：
+
+| | p12（证书） | .mobileprovision（描述文件） |
+|---|---|---|
+| 是什么 | **团队身份**："我是 team 6WV6FC7B82" | **一份授权书**：哪些设备 + 哪个 App ID + 哪些能力 |
+| 范围 | 一个团队，可以签**任意多**个 App | 通常只覆盖**一个 App ID**（或一个通配前缀） |
+| 换 App 要不要换 | 不用 | **要**（除非是通配） |
+
+所以"我用这张证书签了好几个 App"完全成立 —— 那是**同一张 p12 + 多份描述文件**。
+
+### 怎么一眼看出这份描述文件能覆盖几个 App
+
+```bash
+python -c "import plistlib,sys;raw=open(sys.argv[1],'rb').read();d=plistlib.loads(raw[raw.find(b'<?xml'):raw.rfind(b'</plist>')+8]);print(d['Entitlements']['application-identifier'])" app.mobileprovision
+```
+
+| 输出 | 含义 |
+|---|---|
+| `TEAMID.*`（结尾星号） | **通配**：任意 bundle id 都能签，一份走天下 |
+| `TEAMID.com.foo.bar`（具体名字） | **单 App ID**：只覆盖这一个；签别的 App 要另要一份描述文件 |
+
+卖家的"共享签/企业签"通常给通配；"个人签 / UDID 签"通常按 App ID 逐个签发
+（`Name` 常常就是设备 UDID）。
+
+### ⚠️ 一条**尚未验证**的规则（别当成结论）
+
+"App 的 `CFBundleIdentifier` 必须等于描述文件里的 App ID" —— 这条在项目里**没有验证过**。
+两种可能的规则都能解释已有现象：
+
+- **严**：installd 校验 bundle id 与 App ID 一致 → 换 App 必须换描述文件
+- **松**：只校验 entitlements 是否被描述文件授权，bundle id 不管 → 一份描述文件可签多个 App
+
+已知的观察都不足以区分：本项目签 Egern 时，包内 bundle id 是**我们自己先改**成
+描述文件那个 App ID 的（不是工具改的），所以看到 id 相同不能反推规则。
+
+**要下结论只需要一次对照实验**：拿一个 bundle id 与描述文件 App ID **不同**的 ipa 原样签名，
+装一次看是否成功。成功了就是"松"，失败（`ApplicationVerificationFailed`）就是"严"。
+在没做这个实验之前，任何"只能签一个 App"或"随便签"的说法都只是猜测。
+
 ## 三步（或者一条命令）
 
 ```bash
@@ -124,7 +165,7 @@ python deploy.py --ipa in.ipa --p12 cert.p12 --profile app.mobileprovision \
 | `--entitlements` 改了之后三份二进制全变 | zsign 的 `-e` 是**全局**的 | 要「每个 appex 各自的 id」，zsign 做不到，得自己写签名器 |
 | 装机后一开就闪退 | 未信任证书 / 缺少 entitlement 导致 `!` 强解包 | 先 设置→通用→VPN与设备管理 点「信任」；再查权益 |
 | `usbmux list` 返回 `[]` | 没插/没点信任/锁屏/Store 版 iTunes | 逐个排：线→信任→解锁→驱动 |
-| 安装报验证失败 | 描述文件不含该设备 UDID，或 bundle id 与 App ID 不匹配 | 换描述文件或改 bundle id（改 id 要连 appex 一起改） |
+| 安装报验证失败 | ① 描述文件不含这台设备的 UDID ② bundle id 与描述文件 App ID 的关系不满足（见「证书 ≠ 描述文件」一节，此条**未验证**）| 先看 UDID；再拿一份匹配的描述文件，或把 bundle id 改成描述文件那个 App ID（appex 要一起改，保持前缀） |
 | 装完版本号没变 | 你装的是旧包 | `apps query <bundle-id>` 看 `CFBundleVersion` 核对 |
 
 ## 装机后的核对
