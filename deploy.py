@@ -113,6 +113,34 @@ def bundles(zf):
     return out
 
 
+# ----------------------------------------------------------------- bundle id 不变式
+def bundle_ids(ipa):
+    """{bundle_dir: CFBundleIdentifier}，用来证明"签名没有改动 App 的身份"。"""
+    out = {}
+    for _kind, d, info, _bin in bundles(zipfile.ZipFile(ipa)):
+        out[d] = info.get('CFBundleIdentifier')
+    return out
+
+
+def check_ids_unchanged(src, dst, allow=False):
+    """签名只应该换签名，不应该换 App 的身份。
+
+    bundle id 与描述文件的 App ID 无关（实测），所以**没有理由**去改它；
+    改了会让 App 变成另一个 App（覆盖安装、丢数据、和别的 App 撞 id）。
+    """
+    a, b = bundle_ids(src), bundle_ids(dst)
+    diffs = [(d, a[d], b.get(d)) for d in a if a.get(d) != b.get(d)]
+    if not diffs:
+        print('  ✓ bundle id 全部保持原样（%d 个 bundle）' % len(a))
+        return []
+    if allow:
+        for d, x, y in diffs:
+            print('  · 已允许改动：%s  %s -> %s' % (d, x, y))
+        return []
+    return ['%s 的 bundle id 被改了：%s -> %s（签名不该改身份；确认要改请加 --allow-bundle-id-change）'
+            % (d, x, y) for d, x, y in diffs]
+
+
 # ----------------------------------------------------------------- 验
 def verify(ipa, profile, verbose=True):
     prof = read_profile(profile) if isinstance(profile, str) else profile
@@ -275,6 +303,8 @@ def main():
     ap.add_argument('--verify-only', action='store_true', help='只验一个已有的签名包')
     ap.add_argument('--udid', default=None, help='多设备时指定')
     ap.add_argument('--zsign', default=None, help='zsign 路径')
+    ap.add_argument('--allow-bundle-id-change', action='store_true',
+                    help='允许签名过程改动 bundle id（默认禁止：签名不该改 App 身份）')
     a = ap.parse_args()
 
     for p in (a.ipa, a.p12, a.profile):
@@ -305,7 +335,8 @@ def main():
     sign(a.ipa, a.p12, a.profile, out, password, a.zsign)
 
     print('== 验证 %s' % out)
-    problems = verify(out, a.profile)
+    problems = check_ids_unchanged(a.ipa, out, a.allow_bundle_id_change)
+    problems += verify(out, a.profile)
     if problems:
         print('\n  ✗ %d 个问题，不装：' % len(problems))
         for p in problems:

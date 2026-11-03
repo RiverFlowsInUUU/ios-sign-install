@@ -18,6 +18,20 @@ description: Windows 上全命令行给 iPhone 签名并装机（zsign + pymobil
 | 要反复装同一个自签包（每改一版都要装） | 设备未越狱且描述文件不含该设备 UDID |
 | 想「签完先验、验过再装」 | 需要 p12 分文件下发 entitlements（见「坑 1」） |
 
+## 铁律：签名只换签名，不改 App 的身份
+
+**bundle id 一律保持原样**，不要按证书/描述文件去改。理由：
+
+- bundle id 与描述文件里的 App ID **无关**（已实测：同一份描述文件签过多个不同 id）
+- 改了 id = 变成另一个 App：覆盖不了原 App、数据不接续、可能和别的 App 撞 id
+- 签名工具默认就不改；**只有你自己传 `-b` 才会改**——所以别传
+
+`deploy.py` 会**对比签名前后的 bundle id**，只要有一个变了就判失败并拒绝安装；
+确实需要改时显式加 `--allow-bundle-id-change`。
+
+顺带一句：改了 id 也可能改变 App Group / keychain 这类按身份分配的东西，
+让排查变成两变量同时变——这种改动应该在补丁阶段做，而不是签名阶段顺手做。
+
 ## 一次性的前置（装一次就够）
 
 1. **Apple 移动设备驱动**：iTunes **桌面版**自带（`AppleMobileDeviceSupport64.msi` + `Bonjour64.msi`）。
@@ -128,6 +142,7 @@ python -c "import plistlib,sys;raw=open(sys.argv[1],'rb').read();d=plistlib.load
 | 单 App ID `TEAMID.com.x.y` | 随意 | 全部是 `TEAMID.com.x.y` | 差，共用一个身份 |
 
 > 结论：**签名能不能装**只看 entitlements；**装完之后会不会互相串**才看描述文件是通配还是单 App ID。
+> 两者都跟 bundle id 无关 —— 所以签名时**不要动 bundle id**（见上面的铁律）。
 
 ## 三步（或者一条命令）
 
