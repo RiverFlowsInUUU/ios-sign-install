@@ -1,0 +1,25 @@
+# 签名材料：绝不要提交
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+*.ipa
+*.app/
+*.pem
+*.key
+*.cer
+*.crt
+
+# 临时产物
+sign-*/
+*.zsign_debug/
+out*.ipa
+*_signed.ipa
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+__pycache__/
+*.pyc
