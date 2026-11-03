@@ -201,6 +201,24 @@ python deploy.py --ipa in.ipa --p12 cert.p12 --profile app.mobileprovision \
 python -m pymobiledevice3 apps query <bundle-id> | grep -E "CFBundleIdentifier|CFBundleVersion|ApplicationType"
 ```
 
+## 边界：什么样的 App 不该接
+
+`deploy.py` 只管签名装机。**要不要改 App 内部逻辑是另一件事**，而且有些类型改了也白改。
+下面这些是实测踩过的，遇到就早点说不：
+
+| 类型 | 为什么难 | 判断方法 |
+|---|---|---|
+| **SwiftUI + `@Observable` + StoreKit 2** | 付费判定是计算属性，被**完全内联**进各个视图；没有独立 getter，也就没有"改一处"的单点 | 导入符号里有 `Observation0A9RegistrarV6access`；且全程序搜不到调用它的读字段小函数 |
+| 付费墙靠 SwiftUI 状态弹出 | 门槛处不直接调视图函数，只置一个 `@State`/`@Published` 标志，静态追不到"谁触发的" | 搜付费墙视图函数的调用点，只有 1 个（视图链内部） |
+| 交易由 StoreKit 2 校验 | 交易是 Apple 签名的 JWS，本地伪造不了 | 字符串里有 `Transaction.currentEntitlements` / `VerificationResult` |
+
+**这类 App 的正确结论是"静态手段到顶了"**，不是"再扫一遍就能找到"。
+再往下需要动态调试（注入 dylib / lldb），而这两种都要越狱或开发者模式 ——
+没有的话，成本远大于收益，应当直接告诉用户。
+
+同理，**不要**用"再跑一遍更大的扫描"当作承诺：先把"为什么静态找不到"讲清楚，
+再让对方决定要不要投入。
+
 ## 隐私红线（如果这套流程要进 public 仓库）
 
 **绝不提交**：`*.p12`、`*.mobileprovision`、`*.ipa`、密码、设备 UDID、真实 bundle id / App Group 名。
