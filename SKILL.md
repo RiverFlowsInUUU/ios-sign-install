@@ -242,13 +242,18 @@ python -m pymobiledevice3 apps query <bundle-id> | grep -E "CFBundleIdentifier|C
 要动只能动态（注入 dylib / lldb），需要越狱或开发者模式；
 或者改 `AtomStore` 的全局字典，静态同样做不到。
 
-> **2026-11-04 修正：上面这个结论是错的，单点后来找到了。**
-> Atom 库的 `XxxAtom.value(context:)` 不是"无处下手"，它是**普通函数**——
-> 只要有人引用它，`__TEXT,__const` 里就会留一条 `rel32` 指向它。
-> 实测：`0x102B5FA54` 处一条 rel32 → `PremiumTypeAtom.value(context:)` @ `0x1000D13C4`，
-> 函数内 `0xD14A0` 是 `ldrb w20,[sp,#0x8f]`（读 tag），改成 `mov w20,#1`（`f4 3f 42 39` → `34 00 80 52`）即 `.pro`。
-> **教训**：`bl` 调用者 0 次 ≠ 死代码；经表/经 const 数据引用的函数，调用点不会以 `bl` 形式出现。
-> 判断「活不活」的正确姿势是**找谁在静态数据里引用了它的地址**，而不是数 `bl`。
+> **2026-11-04 二次修正（真机实测后）：上面两条都不完全对，实际情况更糟。**
+> 确实能找到 `0x102B5FA54` 一条 rel32 → `0x1000D13C4`（Atom 的 `_Effect`），函数内 `0xD14A0`
+> 是 `ldrb w20,[sp,#0x8f]`，改成 `mov w20,#1` 后**指令确实执行并写进了结构体字段**，
+> 但设置页仍然显示「升级到Pro」——**这个点不是 UI 读的那份状态**。
+> 真正的结论：
+> 1. 付费值来自 `Transaction.currentEntitlements`（StoreKit 2，Apple 签名的 JWS），
+>    侧载下这个序列**是空的**，判定循环一行都不执行（把循环里的 `tbz` 全 NOP 掉也毫无变化，已验证）。
+> 2. 状态存在 `@Observable` 的 `premiumType`（`__Key_premiumType`）里，符号被 strip、
+>    取值被 WMO 内联进各视图，**没有可单点修改的独立 getter**；UserDefaults 里也没有缓存。
+> 3. 描述文件 `get-task-allow=False`，ptrace 被拒，**挂不了调试器**，动态定位也走不通。
+> **一句话**：这类「证据由 Apple 签名、结论在本地派生、且全内联」的 App，静态改字节基本到顶。
+> 想做，得换能注入的环境（TrollStore + dylib hook），不要在只读二进制上耗时间。
 
 ## 隐私红线（如果这套流程要进 public 仓库）
 
