@@ -194,6 +194,10 @@ python deploy.py --ipa in.ipa --p12 cert.p12 --profile app.mobileprovision \
 | `usbmux list` 返回 `[]` | 没插/没点信任/锁屏/Store 版 iTunes | 逐个排：线→信任→解锁→驱动 |
 | 安装报验证失败 | ① 描述文件不含这台设备的 UDID ② bundle id 与描述文件 App ID 的关系不满足（见「证书 ≠ 描述文件」一节，此条**未验证**）| 先看 UDID；再拿一份匹配的描述文件，或把 bundle id 改成描述文件那个 App ID（appex 要一起改，保持前缀） |
 | 装完版本号没变 | 你装的是旧包 | `apps query <bundle-id>` 看 `CFBundleVersion` 核对 |
+| 装上了、一启动就闪退，崩溃报告是 `EXC_CRASH / abort() called`，控制台有 `CKException: Application has malformed entitlements. Found value "*" for entitlement com.apple.developer.icloud-services, expected an array of strings` | **描述文件****把 `icloud-services` 写成字符串 `"*"`**，CloudKit 要的是字符串数组。重签时 zsign 照抄描述文件授权，于是 App 一启动 `+[CKContainer defaultContainer]` 就抛异常| 三条路：① 用 `zsign -e` 换成 `["CloudKit"]` + 填容器列表（**可能被 libmis 拒装 0xe8008015**，因为描述文件里容器列表是空的）；② 二进制把 `defaultContainer` 调用点改成返回 nil，并把 `_OBJC_CLASS_$_NSPersistentCloudKitContainer` 符号串改成 `_OBJC_CLASS_$_NSPersistentContainer`（CoreData 走本地库，放弃 iCloud 同步）；③ 换一份带 iCloud 能力的描述文件。**碰 CloudKit 的 App 不要指望「签完就能跑」** |
+
+**怎么一眼看出会不会踩这条**：`grep -c icloud-services` 看描述文件，
+值不是数组就是雷；App 导入符号里有 `CKContainer` / `NSPersistentCloudKitContainer` 就一定会踩。
 
 ## 装机后的核对
 
@@ -237,6 +241,14 @@ python -m pymobiledevice3 apps query <bundle-id> | grep -E "CFBundleIdentifier|C
 **结论：结构上就是没有静态单点。** 这不是"再扫一遍"能解决的 ——
 要动只能动态（注入 dylib / lldb），需要越狱或开发者模式；
 或者改 `AtomStore` 的全局字典，静态同样做不到。
+
+> **2026-11-04 修正：上面这个结论是错的，单点后来找到了。**
+> Atom 库的 `XxxAtom.value(context:)` 不是"无处下手"，它是**普通函数**——
+> 只要有人引用它，`__TEXT,__const` 里就会留一条 `rel32` 指向它。
+> 实测：`0x102B5FA54` 处一条 rel32 → `PremiumTypeAtom.value(context:)` @ `0x1000D13C4`，
+> 函数内 `0xD14A0` 是 `ldrb w20,[sp,#0x8f]`（读 tag），改成 `mov w20,#1`（`f4 3f 42 39` → `34 00 80 52`）即 `.pro`。
+> **教训**：`bl` 调用者 0 次 ≠ 死代码；经表/经 const 数据引用的函数，调用点不会以 `bl` 形式出现。
+> 判断「活不活」的正确姿势是**找谁在静态数据里引用了它的地址**，而不是数 `bl`。
 
 ## 隐私红线（如果这套流程要进 public 仓库）
 
